@@ -1,0 +1,4 @@
+[submodule "c-lz4"]
+	path = c-lz4
+	url = https://github.com/lz4/lz4
+	branch = master
