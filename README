@@ -1,0 +1,6 @@
+Go bindings for liblz4.
+
+Minimal, static, up-to-date (via git submodule) Go bindings for liblz4.
+
+These bindings have been released under the public domain. Use however you
+feel like, but remember to respect liblz4's 2-Clause BSD license.
