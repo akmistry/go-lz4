@@ -1,10 +1,6 @@
 package lz4
 
-/*
-#cgo CFLAGS: -O2 -I${SRCDIR}/c-lz4/lib
-
-#include "lz4frame.h"
-*/
+// #include "lz4frame.h"
 import "C"
 
 import (
@@ -24,19 +20,26 @@ type Reader struct {
 	bufIndex int
 }
 
-func NewReader(r io.Reader) (*Reader, error) {
-	lr := &Reader{r: r, buf: make([]byte, 0, compressedBufSize)}
-	lz4Err := C.LZ4F_createDecompressionContext(&lr.dctx, C.LZ4F_VERSION)
-	if C.LZ4F_isError(lz4Err) != 0 {
-		return nil, fmt.Errorf("lz4 error: %s", C.GoString(C.LZ4F_getErrorName(lz4Err)))
+func NewReader(r io.Reader) *Reader {
+	return &Reader{r: r, buf: make([]byte, 0, compressedBufSize)}
+}
+
+func (r *Reader) init() error {
+	if r.dctx != nil {
+		return nil
 	}
-	runtime.SetFinalizer(lr, func(r *Reader) {
+
+	lz4Err := C.LZ4F_createDecompressionContext(&r.dctx, C.LZ4F_VERSION)
+	if C.LZ4F_isError(lz4Err) != 0 {
+		return fmt.Errorf("lz4 error: %s", C.GoString(C.LZ4F_getErrorName(lz4Err)))
+	}
+	runtime.SetFinalizer(r, func(r *Reader) {
 		if r.dctx == nil {
 			return
 		}
 		C.LZ4F_freeDecompressionContext(r.dctx)
 	})
-	return lr, nil
+	return nil
 }
 
 func (r *Reader) fill() error {
@@ -57,16 +60,24 @@ func (r *Reader) fill() error {
 }
 
 func (r *Reader) Read(buf []byte) (int, error) {
+	if err := r.init(); err != nil {
+		return 0, err
+	}
+
 	for {
-		err := r.fill()
-		if err != nil {
-			return 0, err
+		fillErr := r.fill()
+		if fillErr != nil && fillErr != io.EOF {
+			return 0, fillErr
 		}
 
 		dstSize := C.size_t(len(buf))
 		srcSize := C.size_t(len(r.buf) - r.bufIndex)
+		srcBuf := unsafe.Pointer(nil)
+		if srcSize > 0 {
+			srcBuf = unsafe.Pointer(&(r.buf[r.bufIndex]))
+		}
 		n := C.LZ4F_decompress(r.dctx, unsafe.Pointer(&buf[0]), &dstSize,
-			unsafe.Pointer(&(r.buf[r.bufIndex])), &srcSize, nil)
+			srcBuf, &srcSize, nil)
 		if C.LZ4F_isError(C.LZ4F_errorCode_t(n)) != 0 {
 			return 0, fmt.Errorf("lz4 decompress error: %s",
 				C.GoString(C.LZ4F_getErrorName(C.LZ4F_errorCode_t(n))))
@@ -75,6 +86,9 @@ func (r *Reader) Read(buf []byte) (int, error) {
 		r.bufIndex += int(srcSize)
 		if dstSize == 0 {
 			// No bytes decoded. Probably ran out of data and buffer needs a refill.
+			if fillErr == io.EOF {
+				return 0, io.EOF
+			}
 			continue
 		}
 		return int(dstSize), nil
@@ -82,6 +96,10 @@ func (r *Reader) Read(buf []byte) (int, error) {
 }
 
 func (r *Reader) Close() error {
+	if r.dctx == nil {
+		return nil
+	}
+
 	// TODO: Pay attention to this error code.
 	C.LZ4F_freeDecompressionContext(r.dctx)
 	r.dctx = nil

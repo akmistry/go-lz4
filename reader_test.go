@@ -11,27 +11,49 @@ const (
 	testTarLz4 = "lz4.tar.lz4"
 )
 
-func TestReader(t *testing.T) {
-	originalBuf, err := ioutil.ReadFile(testTar)
-	if err != nil {
-		t.Fatal(err)
-	}
-	compressedBuf, err := ioutil.ReadFile(testTarLz4)
-	if err != nil {
-		t.Fatal(err)
-	}
+var (
+	originalData   []byte
+	compressedData []byte
+)
 
-	r, err := NewReader(bytes.NewReader(compressedBuf))
+func init() {
+	var err error
+	originalData, err = ioutil.ReadFile(testTar)
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
+	compressedData, err = ioutil.ReadFile(testTarLz4)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func TestReader(t *testing.T) {
+	r := NewReader(bytes.NewReader(compressedData))
 	decompressedBuf, err := ioutil.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r.Close()
-	if bytes.Compare(originalBuf, decompressedBuf) != 0 {
+	if bytes.Compare(originalData, decompressedBuf) != 0 {
 		t.Errorf("decompressed buf (len = %d) != original (len = %d)",
-			len(decompressedBuf), len(originalBuf))
+			len(decompressedBuf), len(originalData))
+	}
+}
+
+func TestReaderByteAtATime(t *testing.T) {
+	r := NewReader(bytes.NewReader(compressedData))
+	defer r.Close()
+	for i, b := range originalData {
+		var buf [1]byte
+		n, err := r.Read(buf[:])
+		if err != nil {
+			t.Errorf("i: %d, err %v != nil", i, err)
+		} else if n != 1 {
+			t.Errorf("i: %d, n %d != 1", i, n)
+		}
+		if buf[0] != b {
+			t.Errorf("i: %d, decompressed %d != original %d", i, buf[0], b)
+		}
 	}
 }
