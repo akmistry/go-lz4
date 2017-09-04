@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"sync"
 	"unsafe"
 )
 
-const compressedBufSize = 4096
+const compressedBufSize = 64 * 1024
+
+var readerBufferPool = sync.Pool{New: func() interface{} { return make([]byte, compressedBufSize) }}
 
 type Reader struct {
 	r    io.Reader
@@ -21,7 +24,7 @@ type Reader struct {
 }
 
 func NewReader(r io.Reader) *Reader {
-	return &Reader{r: r, buf: make([]byte, 0, compressedBufSize)}
+	return &Reader{r: r, buf: readerBufferPool.Get().([]byte)[:0]}
 }
 
 func (r *Reader) init() error {
@@ -103,6 +106,7 @@ func (r *Reader) Close() error {
 	// TODO: Pay attention to this error code.
 	C.LZ4F_freeDecompressionContext(r.dctx)
 	r.dctx = nil
+	readerBufferPool.Put(r.buf)
 	r.buf = nil
 	return nil
 }
